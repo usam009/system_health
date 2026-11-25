@@ -1,2 +1,4 @@
 # system_health
-an linux app that monitors the health of the current system.
+A Linux app that monitors the current system's health.
+All files are in the current repository; please explore them and make sure you complete your assigned part of the project.
+
