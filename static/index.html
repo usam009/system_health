@@ -5,33 +5,90 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>System Health</title>
   <style>
-    body { font-family: sans-serif; background: #111; color: #eee; margin: 2rem; }
-    h1 { margin-top: 0; }
-    .card { background: #1c1c1c; padding: 1rem; margin-bottom: 1rem; border-radius: 8px; }
-    .row { display: flex; justify-content: space-between; padding: 2px 0; }
-    #status { color: #888; }
+    :root {
+      --bg: #0f1115; --card: #1a1d24; --text: #e8eaed; --muted: #8b919c;
+      --ok: #2ecc71; --warn: #f5a623; --crit: #e74c3c; --track: #2a2e37;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 1.5rem; }
+    header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
+    h1 { margin: 0; font-size: 1.5rem; }
+    #sub { color: var(--muted); font-size: 0.85rem; }
+    #badge { padding: 0.5rem 1.2rem; border-radius: 999px; font-weight: 700; background: var(--track); }
+    #badge.ok { background: var(--ok); color: #062b14; }
+    #badge.warn { background: var(--warn); color: #3a2500; }
+    #badge.crit { background: var(--crit); color: #fff; }
+    #hints { background: var(--card); border-radius: 10px; padding: 0.8rem 1rem; margin-bottom: 1rem; }
+    #hints ul { margin: 0; padding-left: 1.2rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+    .card { background: var(--card); border-radius: 10px; padding: 1rem; }
+    .card h3 { margin: 0 0 0.8rem; font-size: 0.95rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 0.9rem; }
+    .row span:first-child { color: var(--muted); }
+    .big { font-size: 2rem; font-weight: 700; margin-bottom: 0.4rem; }
+    .bar { height: 10px; background: var(--track); border-radius: 5px; overflow: hidden; margin: 4px 0 10px; }
+    .fill { height: 100%; border-radius: 5px; transition: width 0.5s, background 0.5s; }
+    .ok-bg { background: var(--ok); } .warn-bg { background: var(--warn); } .crit-bg { background: var(--crit); }
+    .cores { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin-top: 8px; }
+    .core { height: 36px; background: var(--track); border-radius: 4px; position: relative; overflow: hidden; }
+    .core > div { position: absolute; bottom: 0; left: 0; right: 0; }
   </style>
 </head>
 <body>
-  <h1>System Health</h1>
-  <p id="status">Connecting...</p>
+  <header>
+    <div>
+      <h1>System Health</h1>
+      <div id="sub">Connecting...</div>
+    </div>
+    <div id="badge">...</div>
+  </header>
 
-  <div class="card"><h3>System</h3><div id="system"></div></div>
-  <div class="card"><h3>CPU</h3><div id="cpu"></div></div>
-  <div class="card"><h3>Memory</h3><div id="memory"></div></div>
-  <div class="card"><h3>Disk</h3><div id="disk"></div></div>
-  <div class="card"><h3>Network</h3><div id="network"></div></div>
+  <div id="hints"></div>
+
+  <div class="grid">
+    <div class="card"><h3>System</h3><div id="system"></div></div>
+    <div class="card"><h3>CPU</h3><div id="cpu"></div></div>
+    <div class="card"><h3>Memory</h3><div id="memory"></div></div>
+    <div class="card"><h3>Disk</h3><div id="disk"></div></div>
+    <div class="card"><h3>Network</h3><div id="network"></div></div>
+  </div>
 
   <script>
+    const LEVELS = ["ok", "warn", "crit"];
+
+    function level(p) { return p >= 90 ? 2 : p >= 70 ? 1 : 0; }
+
     function row(label, value) {
       return `<div class="row"><span>${label}</span><span>${value}</span></div>`;
     }
 
+    function bar(percent) {
+      const cls = LEVELS[level(percent)];
+      return `<div class="bar"><div class="fill ${cls}-bg" style="width:${Math.min(percent, 100)}%"></div></div>`;
+    }
+
     function formatUptime(s) {
-      const d = Math.floor(s / 86400);
-      const h = Math.floor((s % 86400) / 3600);
-      const m = Math.floor((s % 3600) / 60);
+      const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
       return `${d}d ${h}h ${m}m`;
+    }
+
+    function evaluateHealth(m) {
+      let worst = 0;
+      const hints = [];
+      const check = (lvl, msg) => { worst = Math.max(worst, lvl); if (lvl > 0 && msg) hints.push(msg); };
+
+      check(level(m.cpu.percent), "CPU usage is high.");
+      check(level(m.memory.percent), "Memory is running low.");
+
+      const loadRatio = m.cpu.load[0] / m.cpu.cores;
+      check(loadRatio >= 1 ? 2 : loadRatio >= 0.7 ? 1 : 0, "Load average is high for " + m.cpu.cores + " cores.");
+
+      if (m.memory.swap_percent > 20) check(1, "Swap is in use, memory may be under pressure.");
+
+      m.disk.partitions.forEach(p => check(level(p.percent), "Disk " + p.mount + " is " + p.percent + "% full."));
+
+      if (hints.length === 0) hints.push("All systems normal.");
+      return { status: LEVELS[worst], hints };
     }
 
     async function update() {
@@ -40,33 +97,40 @@
         const m = await res.json();
 
         document.getElementById("system").innerHTML =
-          row("Host", m.system.hostname) +
-          row("OS", m.system.os) +
-          row("Kernel", m.system.kernel) +
-          row("Uptime", formatUptime(m.system.uptime_seconds));
+          row("Host", m.system.hostname) + row("OS", m.system.os) +
+          row("Kernel", m.system.kernel) + row("Uptime", formatUptime(m.system.uptime_seconds));
 
+        const coreBars = m.cpu.per_core.map(p =>
+          `<div class="core" title="${p}%"><div class="${LEVELS[level(p)]}-bg" style="height:${p}%"></div></div>`).join("");
         document.getElementById("cpu").innerHTML =
-          row("Usage", m.cpu.percent + " %") +
-          row("Cores", m.cpu.cores) +
-          row("Load (1/5/15 min)", m.cpu.load.join(" / "));
+          `<div class="big">${m.cpu.percent}%</div>` + bar(m.cpu.percent) +
+          row("Cores", m.cpu.cores) + row("Load (1/5/15 min)", m.cpu.load.join(" / ")) +
+          `<div class="cores">${coreBars}</div>`;
 
         document.getElementById("memory").innerHTML =
-          row("Usage", m.memory.percent + " %") +
+          `<div class="big">${m.memory.percent}%</div>` + bar(m.memory.percent) +
           row("Used", m.memory.used_gb + " / " + m.memory.total_gb + " GB") +
-          row("Swap", m.memory.swap_percent + " %");
+          row("Swap", m.memory.swap_percent + "%");
 
         document.getElementById("disk").innerHTML =
-          m.disk.partitions.map(p => row(p.mount, p.percent + " % (" + p.used_gb + " / " + p.total_gb + " GB)")).join("") +
-          row("Read", m.disk.read_kbps + " KB/s") +
-          row("Write", m.disk.write_kbps + " KB/s");
+          m.disk.partitions.map(p => row(p.mount, p.percent + "% (" + p.used_gb + " / " + p.total_gb + " GB)") + bar(p.percent)).join("") +
+          row("Read", m.disk.read_kbps + " KB/s") + row("Write", m.disk.write_kbps + " KB/s");
 
         document.getElementById("network").innerHTML =
           m.network.map(n => row(n.iface, "↑ " + n.up_kbps + "  ↓ " + n.down_kbps + " KB/s")).join("");
 
-        document.getElementById("status").textContent =
-          "Updated " + new Date().toLocaleTimeString();
+        const h = evaluateHealth(m);
+        const badge = document.getElementById("badge");
+        badge.className = h.status;
+        badge.textContent = { ok: "Healthy", warn: "Warning", crit: "Critical" }[h.status];
+        document.getElementById("hints").innerHTML = "<ul>" + h.hints.map(t => `<li>${t}</li>`).join("") + "</ul>";
+
+        document.getElementById("sub").textContent = "Updated " + new Date().toLocaleTimeString();
       } catch (e) {
-        document.getElementById("status").textContent = "Connection lost";
+        document.getElementById("sub").textContent = "Connection lost";
+        const badge = document.getElementById("badge");
+        badge.className = "crit";
+        badge.textContent = "Offline";
       }
     }
 
